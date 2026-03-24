@@ -1,0 +1,12 @@
+Flask
+google-genai
+groq
+SpeechRecognition
+edge-tts
+pygame
+RPi.GPIO
+pyaudio
+webrtcvad
+opencv-python
+mediapipe
+numpy

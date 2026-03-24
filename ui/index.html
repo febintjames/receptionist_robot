@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reception Bot - Neural Interface</title>
+    <link rel="stylesheet" href="style.css?v=2">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Power-On Splash Screen -->
+    <div id="splash-screen" class="splash-screen">
+        <div class="splash-content">
+            <div class="splash-glow"></div>
+            <img src="public/luminar logo.jpeg" alt="Luminar Technolab" class="splash-logo" />
+            <div class="splash-text">
+                <h1>LUMINAR</h1>
+                <p>TECHNOLAB</p>
+            </div>
+            <div class="splash-loader">
+                <div class="splash-loader-bar"></div>
+            </div>
+        </div>
+        <div class="splash-particles">
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+    </div>
+
+    <!-- Full-Screen Camera View -->
+    <div id="fullscreen-camera" class="fullscreen-camera hidden">
+        <img id="fs-camera-feed" src="/video_feed" alt="Live Camera" />
+        <div class="fs-camera-overlay">
+            <h2>👋 Wave your hand to start interaction</h2>
+        </div>
+    </div>
+
+    <!-- Full-Screen Welcome Screen -->
+    <div id="welcome-screen" class="fullscreen-welcome hidden">
+        <div class="welcome-content">
+            <h1>Welcome to Luminar Technolab</h1>
+            <p class="welcome-subtitle">Come near me and interact</p>
+            <div class="welcome-loader"></div>
+        </div>
+    </div>
+
+    <div class="glass-container splash-main-hidden">
+        <header>
+            <div class="logo">
+                <span class="logo-icon">🎓</span>
+                <h1>LUMINAR <span>TECHNOLAB KAKKANAD</span></h1>
+            </div>
+            <div id="status-indicator" class="status-badge idle">
+                <span class="pulse"></span>
+                <span id="status-text">Ready to Assist</span>
+            </div>
+        </header>
+
+        <main>
+            <aside class="courses-sidebar">
+                <h2>Our Courses</h2>
+                <ul class="course-list">
+                    <li class="course-item" data-course="Data Science & AI/ML">Data Science & AI/ML</li>
+                    <li class="course-item" data-course="Python Full Stack">Python Full Stack</li>
+                    <li class="course-item" data-course="MEAN / MERN Stack">MEAN / MERN Stack</li>
+                    <li class="course-item" data-course="Software Testing">Software Testing</li>
+                    <li class="course-item" data-course="Flutter Development">Flutter Development</li>
+                    <li class="course-item" data-course="Digital Marketing">Digital Marketing</li>
+                    <li class="course-item" data-course="Robotics with AI & IoT">Robotics with AI & IoT</li>
+                </ul>
+                <div class="sidebar-info" style="margin-top: auto; font-size: 11px; opacity: 0.6;">
+                    📍 Kakkanad, Kochi<br>
+                    Near Infopark
+                </div>
+            </aside>
+
+            <div class="visualizer-container">
+                <div id="robot-visual" class="robot-face">
+                    <div class="eyes">
+                        <div class="eye left"></div>
+                        <div class="eye right"></div>
+                    </div>
+                    <div class="mouth"></div>
+                </div>
+                <div id="course-detail" class="course-detail hidden">
+                    <button id="course-back-btn" class="course-back-btn">← Back</button>
+                    <h3 id="course-detail-title" class="course-detail-title"></h3>
+                    <span id="course-detail-duration" class="course-detail-duration"></span>
+                    <p id="course-detail-desc" class="course-detail-desc"></p>
+                    <div id="course-detail-highlights" class="course-detail-highlights"></div>
+                    <div class="course-speaking-indicator" id="course-speaking">
+                        <span class="speaking-dot"></span>
+                        <span class="speaking-dot"></span>
+                        <span class="speaking-dot"></span>
+                        <span>Speaking...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="chat-container" class="chat-log">
+            </div>
+        </main>
+
+        <footer>
+            <div class="input-preview">
+                <span class="label">Listening:</span>
+                <span id="live-transcript">Waiting for voice input...</span>
+            </div>
+        </footer>
+    </div>
+    <script src="app.js?v=4"></script>
+</body>
+</html>
