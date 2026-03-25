@@ -5,7 +5,6 @@ import threading
 import json
 import cv2
 import subprocess
-import subprocess
 import webbrowser
 from flask import Flask, Response, send_from_directory, request, jsonify, stream_with_context
 from flask_cors import CORS
@@ -13,6 +12,7 @@ from servos import ServoController
 from voice import VoiceInterface
 from gemini_brain import ChatBrain
 from vision import VisionHandler
+from motor_bridge import MotorBridge
 import queue
 import speech_recognition as sr
 
@@ -270,11 +270,13 @@ def main():
     brain = ChatBrain()
     vh = VisionHandler()
     vh.start()
+    motor = MotorBridge(port='/dev/ttyUSB0', baudrate=115200)
 
     def signal_handler(sig, frame):
         print("\nExiting and cleaning up...")
         vh.stop()
         sc.cleanup()
+        motor.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -285,6 +287,9 @@ def main():
             # Show welcome screen; wait for someone to come close
             notify_ui('status', {'state': 'Idle'})
             print("State: Welcome — waiting for someone to approach...")
+            
+            # Start circular movement while bored
+            motor.set_state('C')
 
             while True:
                 _, _, _, person_nearby = vh.get_status()
@@ -294,6 +299,10 @@ def main():
 
             # ── STATE: CAMERA ───────────────────────────────────────────
             # Person is close — show camera + wave prompt; wait for wave
+            
+            # STOP moving immediately!
+            motor.stop()
+            
             # Reset any lingering wave from before
             vh.reset_wave()
             notify_ui('status', {'state': 'PersonNearby'})
