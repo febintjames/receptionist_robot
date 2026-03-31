@@ -2,7 +2,7 @@
 
 # Configuration - Update these with your Pi's details
 PI_USER="teffin"
-PI_IP="10.46.123.142" # Replace with your Pi's actual IP address
+PI_IP="10.180.64.142" # Replace with your Pi's actual IP address
 DEST_DIR="~/reception_bot"
 
 echo "🚀 Deploying to $PI_USER@$PI_IP..."

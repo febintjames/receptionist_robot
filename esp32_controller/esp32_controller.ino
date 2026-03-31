@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 //  ESP32 Unified Controller — Receptionist Robot
 //  Controls: 4 arm servos + 2 base DC motors + ultrasonic sensor
-//  
+//
 //  Serial Protocol (115200 baud):
 //  ─────────────────────────────────────────────────────────
 //  COMMANDS (Laptop/Pi → ESP32):
@@ -20,37 +20,39 @@
 // ═══════════════════════════════════════════════════════════════
 
 #include <ESP32Servo.h>
+#define ENA 14 // speed pin for Motor A
+#define ENB 32
 
 // ── Pin Definitions ─────────────────────────────────────────────
 
 // Arm Servos (use any PWM-capable GPIO)
-#define PIN_L_ELBOW  13
-#define PIN_L_WRIST  14
-#define PIN_R_ELBOW  27
-#define PIN_R_WRIST  26
+#define PIN_L_ELBOW 21
+#define PIN_L_WRIST 19
+#define PIN_R_ELBOW 23
+#define PIN_R_WRIST 22
 
 // L298N Motor Driver (base wheels)
-#define PIN_IN1  25
-#define PIN_IN2  33
-#define PIN_IN3  32
-#define PIN_IN4  15
+#define PIN_IN1 27
+#define PIN_IN2 26
+#define PIN_IN3 32
+#define PIN_IN4 15
 
 // Ultrasonic Sensor
-#define PIN_TRIG  12
-#define PIN_ECHO  4
+#define PIN_TRIG 5
+#define PIN_ECHO 18
 
 // ── Safety Threshold ────────────────────────────────────────────
-#define OBSTACLE_DISTANCE_CM  50   // Stop base motors if closer than this
+#define OBSTACLE_DISTANCE_CM 50 // Stop base motors if closer than this
 
 // ── Servo Objects ───────────────────────────────────────────────
-Servo servoLE;  // Left Elbow
-Servo servoLW;  // Left Wrist
-Servo servoRE;  // Right Elbow
-Servo servoRW;  // Right Wrist
+Servo servoLE; // Left Elbow
+Servo servoLW; // Left Wrist
+Servo servoRE; // Right Elbow
+Servo servoRW; // Right Wrist
 
 // ── Home Angles (match servos.py) ───────────────────────────────
-const int HOME_LE = 160;
-const int HOME_LW = 70;
+const int HOME_LE = 110;
+const int HOME_LW = 20;
 const int HOME_RE = 90;
 const int HOME_RW = 40;
 
@@ -67,7 +69,7 @@ float currentRE = HOME_RE;
 float currentRW = HOME_RW;
 
 // ── Base State ──────────────────────────────────────────────────
-char baseState = 'S';  // 'S' = Stop, 'C' = Circle
+char baseState = 'S'; // 'S' = Stop, 'C' = Circle
 bool obstacleActive = false;
 long lastDistance = 999;
 
@@ -158,7 +160,7 @@ void loop() {
     }
   }
 
-  delay(20);  // ~50Hz loop
+  delay(20); // ~50Hz loop
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -169,7 +171,8 @@ void processCommand(String cmd) {
   // Single-character commands
   if (cmd == "C" || cmd == "c") {
     baseState = 'C';
-    if (!obstacleActive) moveCircle();
+    if (!obstacleActive)
+      moveCircle();
     Serial.println("OK");
     return;
   }
@@ -198,7 +201,7 @@ void processCommand(String cmd) {
     status += ":LW:" + String((int)currentLW);
     status += ":RE:" + String((int)currentRE);
     status += ":RW:" + String((int)currentRW);
-    status += ":D:"  + String(lastDistance);
+    status += ":D:" + String(lastDistance);
     Serial.println(status);
     return;
   }
@@ -224,7 +227,8 @@ void parseArmCommand(String cmd) {
   // Parse key:value pairs
   while (data.length() > 0) {
     int colonIdx = data.indexOf(':');
-    if (colonIdx == -1) break;
+    if (colonIdx == -1)
+      break;
 
     String key = data.substring(0, colonIdx);
     data = data.substring(colonIdx + 1);
@@ -242,10 +246,14 @@ void parseArmCommand(String cmd) {
     int val = valStr.toInt();
     val = constrain(val, 0, 180);
 
-    if (key == "LE")      targetLE = val;
-    else if (key == "LW") targetLW = val;
-    else if (key == "RE") targetRE = val;
-    else if (key == "RW") targetRW = val;
+    if (key == "LE")
+      targetLE = val;
+    else if (key == "LW")
+      targetLW = val;
+    else if (key == "RE")
+      targetRE = val;
+    else if (key == "RW")
+      targetRW = val;
   }
 
   sendAngles("OK");
@@ -269,10 +277,13 @@ void smoothMove() {
 
 float interpolate(float current, float target, float maxStep) {
   float diff = target - current;
-  if (abs(diff) < 0.5) return target;
-  float step = diff * 0.3;  // Ease-in factor
-  if (step > maxStep)  step = maxStep;
-  if (step < -maxStep) step = -maxStep;
+  if (abs(diff) < 0.5)
+    return target;
+  float step = diff * 0.3; // Ease-in factor
+  if (step > maxStep)
+    step = maxStep;
+  if (step < -maxStep)
+    step = -maxStep;
   return current + step;
 }
 
@@ -306,7 +317,8 @@ long readUltrasonic() {
   digitalWrite(PIN_TRIG, LOW);
 
   long duration = pulseIn(PIN_ECHO, HIGH, 30000);
-  if (duration == 0) return 999;
+  if (duration == 0)
+    return 999;
   return duration * 0.034 / 2;
 }
 
