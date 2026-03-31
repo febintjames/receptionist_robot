@@ -41,9 +41,9 @@ class MotorBridge:
         else:
             # Stub mode (when ESP32 is unplugged during testing)
             if state_char == 'C':
-                pass # print("[Mock Motor] 🔄 Circling...")
+                print("[Motor] 🔄 Base wheels: Circling")
             elif state_char == 'S':
-                pass # print("[Mock Motor] 🛑 Stopping...")
+                print("[Motor] 🛑 Base wheels: Stopped")
 
     def stop(self):
         """Convenience function to force stop"""

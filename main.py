@@ -12,7 +12,7 @@ from servos import ServoController
 from voice import VoiceInterface
 from gemini_brain import ChatBrain
 from vision import VisionHandler
-from motor_bridge import MotorBridge
+from esp32_bridge import ESP32Bridge
 import queue
 import speech_recognition as sr
 
@@ -264,19 +264,21 @@ def main():
     ui_thread.start()
     print("Web UI available at http://localhost:5000")
 
-    # Initialize components
-    sc = ServoController()
+    # Initialize components — ESP32Bridge is shared between servos and motors
+    esp32 = ESP32Bridge(port='/dev/ttyUSB0', baudrate=115200)
+    sc = ServoController(esp32_bridge=esp32)
     vi = VoiceInterface()
     brain = ChatBrain()
     vh = VisionHandler()
     vh.start()
-    motor = MotorBridge(port='/dev/ttyUSB0', baudrate=115200)
+    # motor commands go through esp32 directly
+    motor = esp32  # esp32.set_state('C'), esp32.stop() — same API as MotorBridge
 
     def signal_handler(sig, frame):
         print("\nExiting and cleaning up...")
         vh.stop()
         sc.cleanup()
-        motor.close()
+        esp32.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -290,6 +292,7 @@ def main():
             
             # Start circular movement while bored
             motor.set_state('C')
+            print("🔄 [Motor] Robot moving in circle (patrolling)")
 
             while True:
                 _, _, _, person_nearby = vh.get_status()
@@ -302,6 +305,7 @@ def main():
             
             # STOP moving immediately!
             motor.stop()
+            print("🛑 [Motor] Robot stopped — person detected nearby")
             
             # Reset any lingering wave from before
             vh.reset_wave()
@@ -373,7 +377,14 @@ def main():
                     break
 
                 notify_ui('status', {'state': 'Thinking'})
+                think_stop = threading.Event()
+                think_thread = threading.Thread(
+                    target=sc.gesture_thinking, args=(think_stop,), daemon=True
+                )
+                think_thread.start()
                 response = brain.get_response(user_text)
+                think_stop.set()
+                think_thread.join(timeout=1.0)
 
                 notify_ui('status', {'state': 'Speaking'})
                 notify_ui('message', {'role': 'robot', 'content': response})
@@ -415,7 +426,14 @@ def main():
                         break
 
                     notify_ui('status', {'state': 'Thinking'})
+                    think_stop2 = threading.Event()
+                    think_thread2 = threading.Thread(
+                        target=sc.gesture_thinking, args=(think_stop2,), daemon=True
+                    )
+                    think_thread2.start()
                     response = brain.get_response(interrupted_text)
+                    think_stop2.set()
+                    think_thread2.join(timeout=1.0)
                     notify_ui('status', {'state': 'Speaking'})
                     notify_ui('message', {'role': 'robot', 'content': response})
                     estimated_duration = max(1.5, len(response) / 15.0)
