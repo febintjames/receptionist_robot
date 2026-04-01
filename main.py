@@ -191,17 +191,17 @@ def course_select():
     if vi:
         vi.stop_speaking()
     
-    # Send course details to UI
-    notify_ui('course-detail', course)
-    notify_ui('status', {'state': 'Speaking'})
-    notify_ui('message', {'role': 'robot', 'content': f"Let me tell you about {course['title']}. {course['description']}"})
-    
     # Speak in background thread so we don't block the HTTP response
     def speak_course():
         global vi
         if vi:
             speech = f"Let me tell you about {course['title']}. {course['description']}"
-            vi.speak(speech)
+            
+            def on_ready():
+                notify_ui('status', {'state': 'Speaking'})
+                notify_ui('message', {'role': 'robot', 'content': speech})
+                
+            vi.speak(speech, on_ready=on_ready)
             notify_ui('status', {'state': 'Idle'})
     
     threading.Thread(target=speak_course, daemon=True).start()
@@ -212,6 +212,9 @@ def notify_ui(event_type, data):
     """Broadcast an SSE event to all connected browser clients."""
     global _last_status
     if event_type == 'status':
+        if _last_status and _last_status.get('state') == data.get('state'):
+            time.sleep(0.01) # Still yield GIL briefly
+            return # AVOID SPAMMING THE QUEUE
         _last_status = data
         
     event = {'type': event_type, 'data': data}
@@ -290,14 +293,43 @@ def main():
             notify_ui('status', {'state': 'Idle'})
             print("State: Welcome — waiting for someone to approach...")
             
-            # Start circular movement while bored
-            motor.set_state('C')
-            print("🔄 [Motor] Robot moving in circle (patrolling)")
+            # Resume square patrol exactly where it left off before interacting
+            motor.base_resume()
+            print("🔄 [Motor] Robot resuming rectangular patrol")
+            
+            # Register the obstacle callback — fires when ESP32 sends an OBSTACLE alert
+            obstacle_event = threading.Event()
+            def on_obstacle(dist):
+                obstacle_event.set()  # Wake up the patrol loop to check camera
+            motor.on_obstacle = on_obstacle
 
             while True:
                 _, _, _, person_nearby = vh.get_status()
                 if person_nearby:
                     break
+
+                # Check if ESP32 raised an obstacle alert
+                if obstacle_event.is_set():
+                    obstacle_event.clear()
+                    print("[Patrol] Obstacle detected — checking camera for human...")
+                    
+                    # Wait up to 1.5s for MediaPipe to get a clean human reading
+                    human_confirmed = False
+                    for _ in range(6):  # 6 x 0.25s = 1.5s
+                        human_detected, _, _, _ = vh.get_status()
+                        if human_detected:
+                            human_confirmed = True
+                            break
+                        time.sleep(0.25)
+                    
+                    if human_confirmed:
+                        print("[Patrol] Human confirmed by camera — starting interaction!")
+                        motor.base_stop()
+                        break  # Exit patrol loop — fall through to CAMERA state
+                    else:
+                        print("[Patrol] Obstacle is inanimate — pivoting left to resume patrol.")
+                        motor.base_resume()  # Tells ESP32 to pivot left and continue the rectangle
+                    
                 time.sleep(0.3)
 
             # ── STATE: CAMERA ───────────────────────────────────────────
@@ -314,6 +346,7 @@ def main():
 
             wave_seen = False
             lost_frames = 0
+            wait_loops = 0
             while True:
                 human_detected, wave_detected, _, person_nearby = vh.get_status()
                 if wave_detected:
@@ -326,9 +359,16 @@ def main():
                 else:
                     lost_frames = 0
                     
+                wait_loops += 1
+                    
                 if lost_frames > 3: # Wait ~1 second (+ 0.75s in vision) = ~1.7s total before reverting
                     print("Person walked away before waving. Back to welcome.")
                     notify_ui('status', {'state': 'Idle'}) # Explicitly tell UI to go back to welcome
+                    break
+                    
+                if wait_loops > 100: # 30 seconds timeout (100 loops * 0.3s)
+                    print("Timeout: Person stood in front but didn't wave for 30s. Resuming patrol.")
+                    notify_ui('status', {'state': 'Idle'})
                     break
                     
                 time.sleep(0.3)
@@ -344,10 +384,14 @@ def main():
             greeting = "Welcome to Luminar Technolab! I am your AI receptionist. How can I help you today?"
             # Small pause so the frontend has time to animate the transition
             time.sleep(0.5)
-            notify_ui('status', {'state': 'Speaking'})
-            notify_ui('message', {'role': 'robot', 'content': greeting})
-            sc.gesture_wave()
-            vi.speak(greeting)
+            
+            def on_greet_ready():
+                notify_ui('status', {'state': 'Speaking'})
+                notify_ui('message', {'role': 'robot', 'content': greeting})
+                sc.gesture_wave()
+                
+            # The robot will stay in earlier UI state until TTS file completely finishes downloading
+            vi.speak(greeting, on_ready=on_greet_ready)
 
             while True:
                 notify_ui('status', {'state': 'Listening'})
@@ -359,10 +403,13 @@ def main():
                     if not human_detected:
                         print("Vision: Human left. Returning to welcome screen.")
                         farewell = "Goodbye! Have a great day!"
-                        notify_ui('status', {'state': 'Speaking'})
-                        notify_ui('message', {'role': 'robot', 'content': farewell})
-                        vi.speak(farewell)
-                        sc.gesture_wave()
+                        
+                        def on_farewell_ready():
+                            notify_ui('status', {'state': 'Speaking'})
+                            notify_ui('message', {'role': 'robot', 'content': farewell})
+                            sc.gesture_wave()
+                            
+                        vi.speak(farewell, on_ready=on_farewell_ready)
                         break
                     continue
 
@@ -370,10 +417,13 @@ def main():
 
                 if "goodbye" in user_text.lower() or "bye" in user_text.lower() or "exit" in user_text.lower():
                     exit_msg = "Goodbye! Have a nice day. Come visit us again!"
-                    notify_ui('status', {'state': 'Speaking'})
-                    notify_ui('message', {'role': 'robot', 'content': exit_msg})
-                    vi.speak(exit_msg)
-                    sc.gesture_wave()
+                    
+                    def on_exit_ready():
+                        notify_ui('status', {'state': 'Speaking'})
+                        notify_ui('message', {'role': 'robot', 'content': exit_msg})
+                        sc.gesture_wave()
+                        
+                    vi.speak(exit_msg, on_ready=on_exit_ready)
                     break
 
                 notify_ui('status', {'state': 'Thinking'})
@@ -386,61 +436,18 @@ def main():
                 think_stop.set()
                 think_thread.join(timeout=1.0)
 
-                notify_ui('status', {'state': 'Speaking'})
-                notify_ui('message', {'role': 'robot', 'content': response})
-
-                estimated_duration = max(1.5, len(response) / 15.0)
-                gesture_thread = threading.Thread(target=sc.gesture_talking, args=(estimated_duration,))
-                gesture_thread.start()
-
-                # Non-blocking speak — listen for interruptions while speaking
-                vi.speak_async(response)
-
-                # While robot is speaking, try to hear user interruptions
-                # Wait 2s before checking — avoids mic picking up the robot's own voice
-                interrupted_text = None
-                speech_start = time.time()
-                while vi.is_speaking():
-                    if time.time() - speech_start < 2.0:
-                        time.sleep(0.2)
-                        continue
-                    interrupt = vi.listen_quick()
-                    if interrupt:
-                        vi.stop_speaking()
-                        interrupted_text = interrupt
-                        print(f"User interrupted with: {interrupt}")
-                        break
-
-                gesture_thread.join(timeout=0.5)
-
-                # If user interrupted, process their new input immediately
-                if interrupted_text:
-                    notify_ui('message', {'role': 'user', 'content': interrupted_text})
-
-                    if "goodbye" in interrupted_text.lower() or "bye" in interrupted_text.lower():
-                        exit_msg = "Goodbye! Have a nice day. Come visit us again!"
-                        notify_ui('status', {'state': 'Speaking'})
-                        notify_ui('message', {'role': 'robot', 'content': exit_msg})
-                        vi.speak(exit_msg)
-                        sc.gesture_wave()
-                        break
-
-                    notify_ui('status', {'state': 'Thinking'})
-                    think_stop2 = threading.Event()
-                    think_thread2 = threading.Thread(
-                        target=sc.gesture_thinking, args=(think_stop2,), daemon=True
-                    )
-                    think_thread2.start()
-                    response = brain.get_response(interrupted_text)
-                    think_stop2.set()
-                    think_thread2.join(timeout=1.0)
+                # Set up the on_ready callback — this only fires when the MP3 finishes downloading
+                # and is actively beginning playback out of the speakers!
+                def on_chat_ready():
                     notify_ui('status', {'state': 'Speaking'})
                     notify_ui('message', {'role': 'robot', 'content': response})
                     estimated_duration = max(1.5, len(response) / 15.0)
-                    gesture_thread = threading.Thread(target=sc.gesture_talking, args=(estimated_duration,))
-                    gesture_thread.start()
-                    vi.speak(response)
-                    gesture_thread.join()
+                    t = threading.Thread(target=sc.gesture_talking, args=(estimated_duration,), daemon=True)
+                    t.start()
+
+                # Synchronous non-interruptable speech
+                vi.speak(response, on_ready=on_chat_ready)
+                time.sleep(0.5)
 
             # Chat ended — reset brain memory, clear chat log, go back to welcome
             brain.reset()

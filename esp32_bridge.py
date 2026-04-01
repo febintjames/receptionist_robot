@@ -43,7 +43,11 @@ class ESP32Bridge:
             return
 
         try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
+            self.ser = serial.Serial(self.port, self.baudrate, timeout=1, write_timeout=1)
+            # Disable hardware flow control lines to prevent write buffers from hanging on Linux
+            self.ser.dtr = False
+            self.ser.rts = False
+            
             self.connected = True
             print(f"[ESP32] Connected on {self.port}")
             # Wait for ESP32 reboot after serial connection
@@ -62,38 +66,52 @@ class ESP32Bridge:
         """Read any boot messages from ESP32."""
         if not self.connected:
             return
+        
+        # Disable blocking on readline just for boot flush
+        old_timeout = self.ser.timeout
+        self.ser.timeout = 0.1
+        
         end_time = time.time() + 2
         while time.time() < end_time:
             try:
-                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    print(f"[ESP32 boot] {line}")
-                    if line == "READY":
-                        print("[ESP32] ✅ Firmware ready!")
-                        return
+                if self.ser.in_waiting > 0:
+                    line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line:
+                        print(f"[ESP32 boot] {line}")
+                        if line == "READY":
+                            print("[ESP32] ✅ Firmware ready!")
+                            break
+                else:
+                    time.sleep(0.05)
             except Exception:
                 pass
+                
+        # Restore timeout
+        self.ser.timeout = old_timeout
 
     def _read_loop(self):
-        """Background reader — picks up OBSTACLE alerts from ESP32."""
+        """Background reader — picks up OBSTACLE alerts from ESP32.
+        Uses the same lock as _send() so the two never race on readline()."""
         while self._running and self.connected:
             try:
-                if self.ser and self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                    if line.startswith("OBSTACLE:"):
-                        try:
-                            dist = int(line.split(":")[1])
-                            self.last_distance = dist
-                            self.obstacle_active = True
-                            print(f"[ESP32] ⚠️  OBSTACLE at {dist}cm — motors stopped!")
-                            if self.on_obstacle:
-                                self.on_obstacle(dist)
-                        except (ValueError, IndexError):
-                            pass
-                    elif not line.startswith("OK") and not line.startswith("STATUS"):
-                        # Print any unexpected responses for debugging
-                        if line:
-                            print(f"[ESP32] {line}")
+                # Only try to read if the send path isn't mid-transaction
+                with self._lock:
+                    if self.ser and self.ser.in_waiting > 0:
+                        line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                    else:
+                        line = ""
+                if line.startswith("OBSTACLE:"):
+                    try:
+                        dist = int(line.split(":")[1])
+                        self.last_distance = dist
+                        self.obstacle_active = True
+                        print(f"[ESP32] ⚠️  OBSTACLE at {dist}cm — motors stopped!")
+                        if self.on_obstacle:
+                            self.on_obstacle(dist)
+                    except (ValueError, IndexError):
+                        pass
+                elif line and not line.startswith("OK") and not line.startswith("STATUS"):
+                    print(f"[ESP32] {line}")
                 time.sleep(0.05)
             except Exception as e:
                 if self._running:
@@ -101,9 +119,10 @@ class ESP32Bridge:
                 time.sleep(0.1)
 
     def _send(self, command):
-        """Send a command to ESP32 and return the response."""
+        """Send a command to ESP32 and return the response.
+        Holds the lock for the entire write+readline so _read_loop cannot
+        interleave and steal the OK/STATUS response."""
         if not self.connected:
-            # Stub mode
             print(f"[ESP32 stub] → {command}")
             return "OK"
         
@@ -111,9 +130,29 @@ class ESP32Bridge:
             try:
                 self.ser.write(f"{command}\n".encode('utf-8'))
                 self.ser.flush()
-                # Read response (with short timeout)
-                response = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                return response
+                # Wait for response; ESP32 always replies within ~100 ms
+                deadline = time.time() + 1.0
+                while time.time() < deadline:
+                    if self.ser.in_waiting > 0:
+                        response = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                        # If we accidentally read an OBSTACLE alert here, handle it
+                        # and keep waiting for the command's own response.
+                        if response.startswith("OBSTACLE:"):
+                            try:
+                                dist = int(response.split(":")[1])
+                                self.last_distance = dist
+                                self.obstacle_active = True
+                                print(f"[ESP32] ⚠️  OBSTACLE at {dist}cm (captured in send)")
+                                if self.on_obstacle:
+                                    threading.Thread(
+                                        target=self.on_obstacle, args=(dist,), daemon=True
+                                    ).start()
+                            except (ValueError, IndexError):
+                                pass
+                            continue  # wait for the real OK/STATUS
+                        return response
+                    time.sleep(0.01)
+                return ""  # timeout
             except Exception as e:
                 print(f"[ESP32] Send error: {e}")
                 return ""
@@ -127,6 +166,12 @@ class ESP32Bridge:
     def base_stop(self):
         """Stop base motors."""
         return self._send("S")
+
+    def base_resume(self):
+        """Tell ESP32 to skip the obstacle and continue patrol with a left pivot.
+        Use this when the camera confirms the obstacle is NOT a human."""
+        self.obstacle_active = False
+        return self._send("RESUME")
 
     # Legacy MotorBridge compatibility
     def set_state(self, state_char):

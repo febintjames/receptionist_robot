@@ -2,7 +2,7 @@ import os
 import time
 import re
 import threading
-import struct
+import subprocess
 import speech_recognition as sr
 import asyncio
 import edge_tts
@@ -28,19 +28,26 @@ class VoiceInterface:
         self.voice_en = "en-US-AvaNeural"     # Natural American female
         self.voice_ml = "ml-IN-SobhanaNeural"  # Malayalam female
         
-        # We need a lock for engine speak to avoid threading issues
         self.engine_lock = threading.Lock()
         self._speaking = False
+        self._playback_process = None
         self.temp_dir = tempfile.gettempdir()
 
     def stop_speaking(self):
         """Stops any ongoing audio playback."""
         if self._speaking:
+            self._speaking = False
+            # Safely kill the subprocess if it's running
+            if self._playback_process and self._playback_process.poll() is None:
+                try:
+                    self._playback_process.terminate()
+                except Exception:
+                    pass
+            # Also try to stop pygame just in case
             try:
                 pygame.mixer.music.stop()
             except Exception:
                 pass
-            self._speaking = False
 
     def _init_microphone(self):
         # Initialize microphone only when needed to avoid issues on some systems
@@ -111,42 +118,68 @@ class VoiceInterface:
         communicate = edge_tts.Communicate(text, voice, rate=rate)
         await communicate.save(output_file)
 
-    def speak(self, text):
+    def speak(self, text, on_ready=None):
         """Converts text to speech using Edge TTS and plays it."""
         if not text:
+            if on_ready: on_ready()
             return
 
         # Filter out gesture tags inside [brackets]
         speech_text = re.sub(r'\[.*?\]', '', text).strip()
         if not speech_text:
+            if on_ready: on_ready()
             return
 
-        print(f"Speaking: {speech_text}")
-        
         with self.engine_lock:
             self._speaking = True
             temp_file = os.path.join(self.temp_dir, f"speech_{int(time.time())}.mp3")
             
             try:
-                # Generate audio file asynchronously
+                # Generate audio file asynchronously (causes 1-3s delay)
                 asyncio.run(self._generate_speech(speech_text, temp_file))
                 
-                # Play audio using pygame
-                pygame.mixer.music.load(temp_file)
-                pygame.mixer.music.play()
+                # Signal to the UI that audio is fully downloaded and starting NOW
+                print(f"Speaking: {speech_text}")
+                if on_ready:
+                    on_ready()
                 
-                # Wait for playback to finish
-                while pygame.mixer.music.get_busy():
-                    if not self._speaking: # Check if stop_speaking was called
-                        pygame.mixer.music.stop()
-                        break
-                    time.sleep(0.1)
+                # Try playing via robust command line tools (best for headless Pi overrides ALSA limitations)
+                played = False
+                players = [
+                    ['mpg123', '-q', temp_file],
+                    ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', temp_file],
+                    ['mplayer', '-really-quiet', temp_file]
+                ]
                 
-                pygame.mixer.music.unload()
+                for cmd in players:
+                    if not self._speaking: break # Check if stop was called immediately
+                    try:
+                        self._playback_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        self._playback_process.wait() # Block until audio finishes naturally or is terminated
+                        if self._playback_process.returncode == 0:
+                            played = True
+                            break
+                    except FileNotFoundError:
+                        continue
+                        
+                # Fallback to pygame if no CLI tools installed (will print ALSA errors if headless)
+                if not played and self._speaking:
+                    try:
+                        if not pygame.mixer.get_init():
+                            pygame.mixer.init()
+                        pygame.mixer.music.load(temp_file)
+                        pygame.mixer.music.play()
+                        while pygame.mixer.music.get_busy() and self._speaking:
+                            time.sleep(0.1)
+                        pygame.mixer.music.unload()
+                    except Exception as e:
+                        print(f"Fallback pygame TTS Error: {e}")
+                        
             except Exception as e:
                 print(f"TTS Error: {e}")
             finally:
                 self._speaking = False
+                self._playback_process = None
                 # Cleanup temp file
                 if os.path.exists(temp_file):
                     try:

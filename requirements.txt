@@ -1,4 +1,6 @@
 Flask
+flask-cors
+pyserial
 google-genai
 groq
 SpeechRecognition

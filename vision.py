@@ -6,11 +6,12 @@ import numpy as np
 
 class VisionHandler:
     def __init__(self):
-        # ── Haar Cascade for fast face detection (replaces FaceMesh) ──────────
-        cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
-        if self.face_cascade.empty():
-            raise RuntimeError("Failed to load Haar Cascade. Check OpenCV installation.")
+        # ── MediaPipe Face Detection (Bypassing broken OpenCV CascadeClassifier) ──
+        self.mp_face_detection = mp.solutions.face_detection
+        self.face_detection = self.mp_face_detection.FaceDetection(
+            model_selection=0, # 0 = fast/short-range (<2m), perfect for reception bot
+            min_detection_confidence=0.6
+        )
 
         # ── MediaPipe Pose for wave detection (already optimal — MoveNet internally) ──
         self.mp_pose = mp.solutions.pose
@@ -105,15 +106,24 @@ class VisionHandler:
                                interpolation=cv2.INTER_LINEAR)
             gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
 
-            # ── Face detection via Haar Cascade (every 2nd frame to save CPU) ──
+            # ── Face detection via MediaPipe (every 2nd frame to save CPU) ──
             if self._frame_counter % 2 == 0:
-                self._last_faces = self.face_cascade.detectMultiScale(
-                    gray,
-                    scaleFactor=1.2,
-                    minNeighbors=5,
-                    minSize=(30, 30),
-                    flags=cv2.CASCADE_SCALE_IMAGE
-                )
+                rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                rgb_small.flags.writeable = False
+                
+                results = self.face_detection.process(rgb_small)
+                
+                faces = []
+                if results.detections:
+                    for detection in results.detections:
+                        bbox = detection.location_data.relative_bounding_box
+                        x = int(bbox.xmin * self.PROC_WIDTH)
+                        y = int(bbox.ymin * self.PROC_HEIGHT)
+                        fw = int(bbox.width * self.PROC_WIDTH)
+                        fh = int(bbox.height * self.PROC_HEIGHT)
+                        faces.append((x, y, fw, fh))
+                        
+                self._last_faces = faces
             faces = getattr(self, '_last_faces', ())
 
             with self.lock:
