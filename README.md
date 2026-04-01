@@ -156,6 +156,7 @@ python3 main.py
 | Servos jitter | Use external 5V power, not ESP32's 5V |
 | Motors spin wrong way | Swap IN1↔IN2 or IN3↔IN4 wires |
 | `OBSTACLE` keeps firing | Check HC-SR04 wiring |
+| `A module that was compiled using NumPy 1.x...` or `numpy.core.multiarray failed to import` | Reinstall compatible deps: `pip uninstall -y numpy && pip install "numpy<2" && pip install --force-reinstall mediapipe matplotlib` |
 
 ---
 

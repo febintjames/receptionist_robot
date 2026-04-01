@@ -11,4 +11,4 @@ pyaudio
 webrtcvad
 opencv-python
 mediapipe
-numpy
+numpy<2
